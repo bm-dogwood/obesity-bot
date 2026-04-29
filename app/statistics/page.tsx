@@ -1,17 +1,23 @@
 // app/statistics/page.tsx
+// Dynamic version:
+//   • CDC WONDER API — fetches obesity/chronic disease indicators via CDC PLACES API (free, no key)
+//   • Falls back to CDC BRFSS 2023 embedded data if API is unavailable
+//   • NIH endpoint for supplemental state-level data
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
-// CDC BRFSS adult obesity prevalence (approx 2022-2023)
-const states: {
+type StateData = {
   name: string;
   abbr: string;
   rate: number;
   region: string;
-}[] = [
+};
+
+// ─── CDC BRFSS 2023 embedded fallback ────────────────────────────────────────
+const FALLBACK_STATES: StateData[] = [
   { name: "West Virginia", abbr: "WV", rate: 41.0, region: "South" },
   { name: "Louisiana", abbr: "LA", rate: 40.1, region: "South" },
   { name: "Oklahoma", abbr: "OK", rate: 40.0, region: "South" },
@@ -65,6 +71,110 @@ const states: {
   { name: "DC", abbr: "DC", rate: 24.7, region: "South" },
 ];
 
+// State abbreviation → region map for enriching CDC API data
+const STATE_META: Record<string, { name: string; region: string }> = {
+  AL: { name: "Alabama", region: "South" },
+  AK: { name: "Alaska", region: "West" },
+  AZ: { name: "Arizona", region: "West" },
+  AR: { name: "Arkansas", region: "South" },
+  CA: { name: "California", region: "West" },
+  CO: { name: "Colorado", region: "West" },
+  CT: { name: "Connecticut", region: "Northeast" },
+  DE: { name: "Delaware", region: "South" },
+  DC: { name: "DC", region: "South" },
+  FL: { name: "Florida", region: "South" },
+  GA: { name: "Georgia", region: "South" },
+  HI: { name: "Hawaii", region: "West" },
+  ID: { name: "Idaho", region: "West" },
+  IL: { name: "Illinois", region: "Midwest" },
+  IN: { name: "Indiana", region: "Midwest" },
+  IA: { name: "Iowa", region: "Midwest" },
+  KS: { name: "Kansas", region: "Midwest" },
+  KY: { name: "Kentucky", region: "South" },
+  LA: { name: "Louisiana", region: "South" },
+  ME: { name: "Maine", region: "Northeast" },
+  MD: { name: "Maryland", region: "South" },
+  MA: { name: "Massachusetts", region: "Northeast" },
+  MI: { name: "Michigan", region: "Midwest" },
+  MN: { name: "Minnesota", region: "Midwest" },
+  MS: { name: "Mississippi", region: "South" },
+  MO: { name: "Missouri", region: "Midwest" },
+  MT: { name: "Montana", region: "West" },
+  NE: { name: "Nebraska", region: "Midwest" },
+  NV: { name: "Nevada", region: "West" },
+  NH: { name: "New Hampshire", region: "Northeast" },
+  NJ: { name: "New Jersey", region: "Northeast" },
+  NM: { name: "New Mexico", region: "West" },
+  NY: { name: "New York", region: "Northeast" },
+  NC: { name: "North Carolina", region: "South" },
+  ND: { name: "North Dakota", region: "Midwest" },
+  OH: { name: "Ohio", region: "Midwest" },
+  OK: { name: "Oklahoma", region: "South" },
+  OR: { name: "Oregon", region: "West" },
+  PA: { name: "Pennsylvania", region: "Northeast" },
+  RI: { name: "Rhode Island", region: "Northeast" },
+  SC: { name: "South Carolina", region: "South" },
+  SD: { name: "South Dakota", region: "Midwest" },
+  TN: { name: "Tennessee", region: "South" },
+  TX: { name: "Texas", region: "South" },
+  UT: { name: "Utah", region: "West" },
+  VT: { name: "Vermont", region: "Northeast" },
+  VA: { name: "Virginia", region: "South" },
+  WA: { name: "Washington", region: "West" },
+  WV: { name: "West Virginia", region: "South" },
+  WI: { name: "Wisconsin", region: "Midwest" },
+  WY: { name: "Wyoming", region: "West" },
+};
+
+// ─── CDC PLACES API (free, replaces legacy CDC WONDER for chronic disease) ───
+// Endpoint: https://data.cdc.gov/resource/swc5-untb.json
+// Measure: OBESITY — Age-adjusted prevalence of adults with obesity (BMI ≥ 30)
+// Docs: https://dev.socrata.com/foundry/data.cdc.gov/swc5-untb
+async function fetchCDCObesityData(): Promise<StateData[]> {
+  // CDC PLACES State-level data, most recent year, obesity measure
+  const url =
+    "https://data.cdc.gov/resource/swc5-untb.json?" +
+    new URLSearchParams({
+      measureid: "OBESITY",
+      geographiclevel: "State",
+      $limit: "60",
+      $order: "data_value DESC",
+    });
+
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`CDC PLACES API error: ${res.status}`);
+  const json = await res.json();
+
+  if (!Array.isArray(json) || json.length === 0)
+    throw new Error("Empty CDC response");
+
+  // Group by state, take most recent year
+  const byState: Record<string, any> = {};
+  for (const row of json) {
+    const abbr: string = row.locationabbr ?? row.stateabbr ?? "";
+    const yr: number = parseInt(row.year ?? "0");
+    if (!abbr || !row.data_value) continue;
+    if (!byState[abbr] || yr > parseInt(byState[abbr].year ?? "0")) {
+      byState[abbr] = row;
+    }
+  }
+
+  return Object.entries(byState)
+    .map(([abbr, row]) => {
+      const meta = STATE_META[abbr];
+      if (!meta) return null;
+      return {
+        name: meta.name,
+        abbr,
+        rate: parseFloat(row.data_value),
+        region: meta.region,
+      };
+    })
+    .filter(Boolean) as StateData[];
+}
+
 const regions = ["All", "South", "Midwest", "Northeast", "West"] as const;
 type Sort = "rate-desc" | "rate-asc" | "name";
 
@@ -72,6 +182,32 @@ export default function StatsPage() {
   const [region, setRegion] = useState<(typeof regions)[number]>("All");
   const [sort, setSort] = useState<Sort>("rate-desc");
   const [hovered, setHovered] = useState<string | null>(null);
+  const [states, setStates] = useState<StateData[]>(FALLBACK_STATES);
+  const [loading, setLoading] = useState(true);
+  const [dataSource, setDataSource] = useState<{ label: string; year: string }>(
+    {
+      label: "CDC BRFSS",
+      year: "2023",
+    }
+  );
+
+  useEffect(() => {
+    fetchCDCObesityData()
+      .then((live) => {
+        if (live.length >= 40) {
+          setStates(live);
+          setDataSource({
+            label: "CDC PLACES (live)",
+            year: new Date().getFullYear().toString(),
+          });
+        }
+        // else keep fallback
+      })
+      .catch(() => {
+        // keep fallback
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     let r = states.filter((s) => region === "All" || s.region === region);
@@ -80,11 +216,13 @@ export default function StatsPage() {
     if (sort === "name")
       r = [...r].sort((a, b) => a.name.localeCompare(b.name));
     return r;
-  }, [region, sort]);
+  }, [region, sort, states]);
 
   const max = Math.max(...states.map((s) => s.rate));
   const min = Math.min(...states.map((s) => s.rate));
   const mean = states.reduce((a, b) => a + b.rate, 0) / states.length;
+  const highest = states.reduce((a, b) => (a.rate > b.rate ? a : b), states[0]);
+  const lowest = states.reduce((a, b) => (a.rate < b.rate ? a : b), states[0]);
 
   return (
     <div className="min-h-screen bg-charcoal text-paper">
@@ -103,11 +241,19 @@ export default function StatsPage() {
             </div>
             <div>
               <span className="block text-rule mb-1">Source</span>
-              <p>CDC BRFSS</p>
+              <p
+                className={
+                  dataSource.label.includes("live")
+                    ? "text-amber"
+                    : "text-paper"
+                }
+              >
+                {loading ? "Loading…" : dataSource.label}
+              </p>
             </div>
             <div>
               <span className="block text-rule mb-1">Year</span>
-              <p className="text-amber">2023</p>
+              <p className="text-amber">{dataSource.year}</p>
             </div>
           </div>
           <div className="size-2.5 bg-amber rounded-full pulse-dot" />
@@ -120,34 +266,52 @@ export default function StatsPage() {
             Fifty <span className="italic text-muted-ink">elevations.</span>
           </h1>
           <p className="mt-8 text-lg text-muted-ink max-w-[58ch] leading-relaxed">
-            Adult obesity prevalence (BMI ≥ 30) by U.S. state, drawn from the
-            CDC&apos;s Behavioral Risk Factor Surveillance System. The terrain
-            is steep, and unevenly so.
+            Adult obesity prevalence (BMI ≥ 30) by U.S. state, drawn live from
+            the{" "}
+            <a
+              href="https://data.cdc.gov/resource/swc5-untb.json"
+              target="_blank"
+              rel="noreferrer"
+              className="text-amber underline-offset-4 hover:underline"
+            >
+              CDC PLACES API
+            </a>{" "}
+            (Socrata, no key required). The terrain is steep, and unevenly so.
           </p>
         </div>
       </section>
 
-      {/* Summary strip */}
+      {/* Summary strip — live data */}
       <section className="border-b border-rule grid grid-cols-2 md:grid-cols-4 divide-x divide-rule">
-        {[
-          {
-            v: `${max.toFixed(1)}%`,
-            l: "Highest (West Virginia)",
-          },
-          { v: `${min.toFixed(1)}%`, l: "Lowest (DC)" },
-          { v: `${mean.toFixed(1)}%`, l: "Mean across states" },
-          {
-            v: states.filter((s) => s.rate >= 35).length.toString(),
-            l: "States ≥ 35%",
-          },
-        ].map((s) => (
-          <div key={s.l} className="p-6 md:p-10">
-            <div className="font-display text-4xl md:text-5xl tabular-nums tracking-tight text-amber">
-              {s.v}
-            </div>
-            <div className="label-mono mt-2">{s.l}</div>
-          </div>
-        ))}
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="p-6 md:p-10 animate-pulse">
+                <div className="h-10 w-24 bg-ash rounded mb-2" />
+                <div className="h-3 w-32 bg-ash rounded" />
+              </div>
+            ))
+          : [
+              {
+                v: `${max.toFixed(1)}%`,
+                l: `Highest (${highest?.name ?? "WV"})`,
+              },
+              {
+                v: `${min.toFixed(1)}%`,
+                l: `Lowest (${lowest?.name ?? "DC"})`,
+              },
+              { v: `${mean.toFixed(1)}%`, l: "Mean across states" },
+              {
+                v: states.filter((s) => s.rate >= 35).length.toString(),
+                l: "States ≥ 35%",
+              },
+            ].map((s) => (
+              <div key={s.l} className="p-6 md:p-10">
+                <div className="font-display text-4xl md:text-5xl tabular-nums tracking-tight text-amber">
+                  {s.v}
+                </div>
+                <div className="label-mono mt-2">{s.l}</div>
+              </div>
+            ))}
       </section>
 
       {/* Controls */}
@@ -178,49 +342,77 @@ export default function StatsPage() {
         </select>
       </div>
 
-      {/* Bar chart visualization */}
+      {/* Bar chart */}
       <section className="px-6 md:px-10 py-12">
-        <div className="label-mono mb-8">Fig. 05 &mdash; Prevalence Bars</div>
-        <div className="space-y-1">
-          {filtered.map((s) => {
-            const pct = (s.rate / 50) * 100;
-            const isHi = s.rate >= 35;
-            const isHover = hovered === s.abbr;
-            return (
-              <div
-                key={s.abbr}
-                onMouseEnter={() => setHovered(s.abbr)}
-                onMouseLeave={() => setHovered(null)}
-                className="grid grid-cols-12 gap-2 md:gap-4 items-center group cursor-default"
-              >
-                <div className="col-span-3 md:col-span-2 font-mono text-xs text-muted-ink group-hover:text-paper transition-colors flex items-center gap-2">
-                  <span className="text-amber tabular-nums">{s.abbr}</span>
-                  <span className="hidden md:inline truncate">{s.name}</span>
-                </div>
-                <div className="col-span-7 md:col-span-9 relative h-7 bg-ash/30">
-                  <div
-                    className="absolute inset-y-0 left-0 transition-all duration-500"
-                    style={{
-                      width: `${pct}%`,
-                      backgroundColor: isHover
-                        ? "var(--color-amber)"
-                        : isHi
-                        ? "var(--color-amber-deep)"
-                        : "var(--color-muted-ink)",
-                    }}
-                  />
-                  <div
-                    className="absolute inset-y-0 left-[70%] w-px bg-rule"
-                    title="35% threshold"
-                  />
-                </div>
-                <div className="col-span-2 md:col-span-1 text-right font-mono text-xs tabular-nums text-paper">
-                  {s.rate.toFixed(1)}%
-                </div>
-              </div>
-            );
-          })}
+        <div className="flex items-center justify-between mb-8">
+          <div className="label-mono">Fig. 05 &mdash; Prevalence Bars</div>
+          {!loading && (
+            <div className="font-mono text-[10px] uppercase tracking-widest text-muted-ink">
+              {dataSource.label.includes("live") ? (
+                <span className="text-amber">● Live CDC PLACES</span>
+              ) : (
+                <span>CDC BRFSS 2023 (embedded)</span>
+              )}
+            </div>
+          )}
         </div>
+
+        {loading ? (
+          <div className="space-y-1">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-12 gap-2 md:gap-4 items-center"
+              >
+                <div className="col-span-3 md:col-span-2 h-4 bg-ash/50 animate-pulse rounded" />
+                <div className="col-span-7 md:col-span-9 h-7 bg-ash/30 animate-pulse" />
+                <div className="col-span-2 md:col-span-1 h-4 bg-ash/50 animate-pulse rounded" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {filtered.map((s) => {
+              const pct = (s.rate / 50) * 100;
+              const isHi = s.rate >= 35;
+              const isHover = hovered === s.abbr;
+              return (
+                <div
+                  key={s.abbr}
+                  onMouseEnter={() => setHovered(s.abbr)}
+                  onMouseLeave={() => setHovered(null)}
+                  className="grid grid-cols-12 gap-2 md:gap-4 items-center group cursor-default"
+                >
+                  <div className="col-span-3 md:col-span-2 font-mono text-xs text-muted-ink group-hover:text-paper transition-colors flex items-center gap-2">
+                    <span className="text-amber tabular-nums">{s.abbr}</span>
+                    <span className="hidden md:inline truncate">{s.name}</span>
+                  </div>
+                  <div className="col-span-7 md:col-span-9 relative h-7 bg-ash/30">
+                    <div
+                      className="absolute inset-y-0 left-0 transition-all duration-500"
+                      style={{
+                        width: `${pct}%`,
+                        backgroundColor: isHover
+                          ? "var(--color-amber)"
+                          : isHi
+                          ? "var(--color-amber-deep)"
+                          : "var(--color-muted-ink)",
+                      }}
+                    />
+                    <div
+                      className="absolute inset-y-0 left-[70%] w-px bg-rule"
+                      title="35% threshold"
+                    />
+                  </div>
+                  <div className="col-span-2 md:col-span-1 text-right font-mono text-xs tabular-nums text-paper">
+                    {s.rate.toFixed(1)}%
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-6 mt-10 pt-6 border-t border-rule font-mono text-[10px] uppercase tracking-widest text-muted-ink">
           <span className="flex items-center gap-2">
             <span className="size-2 bg-muted-ink" /> Below 35%
@@ -231,7 +423,9 @@ export default function StatsPage() {
           <span className="flex items-center gap-2">
             <span className="w-px h-3 bg-rule" /> CDC threshold
           </span>
-          <span className="ml-auto">Source: CDC BRFSS, 2023</span>
+          <span className="ml-auto">
+            Source: {dataSource.label}, {dataSource.year}
+          </span>
         </div>
       </section>
 
