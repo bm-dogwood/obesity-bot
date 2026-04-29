@@ -1,26 +1,179 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-charcoal: var(--charcoal);
+  --color-paper: var(--paper);
+  --color-ash: var(--ash);
+  --color-amber: var(--amber);
+  --color-amber-deep: var(--amber-deep);
+  --color-muted-ink: var(--muted-ink);
+  --color-rule: var(--rule);
+
+  --font-display: "Newsreader", Georgia, serif;
+  --font-sans: "Manrope", system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --radius: 0.25rem;
+
+  /* Editorial broadsheet palette */
+  --charcoal: oklch(0.16 0.005 90);
+  --paper: oklch(0.92 0.018 80);
+  --ash: oklch(0.27 0.006 90);
+  --amber: oklch(0.68 0.16 55);
+  --amber-deep: oklch(0.55 0.15 50);
+  --muted-ink: oklch(0.58 0.008 85);
+  --rule: oklch(0.24 0.005 90);
+
+  --background: var(--charcoal);
+  --foreground: var(--paper);
+  --card: oklch(0.18 0.005 90);
+  --card-foreground: var(--paper);
+  --popover: oklch(0.18 0.005 90);
+  --popover-foreground: var(--paper);
+  --primary: var(--amber);
+  --primary-foreground: var(--charcoal);
+  --secondary: var(--ash);
+  --secondary-foreground: var(--paper);
+  --muted: var(--ash);
+  --muted-foreground: var(--muted-ink);
+  --accent: var(--amber);
+  --accent-foreground: var(--charcoal);
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: var(--paper);
+  --border: var(--rule);
+  --input: var(--rule);
+  --ring: var(--amber);
+}
+
+.dark {
+  --background: var(--charcoal);
+  --foreground: var(--paper);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    background-color: var(--color-charcoal);
+    color: var(--color-paper);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-amber);
+    color: var(--color-charcoal);
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .font-mono {
+    font-family: var(--font-mono);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .label-mono {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--color-muted-ink);
+  }
+
+  .rule-line {
+    height: 1px;
+    background: var(--color-rule);
+  }
+
+  .marquee {
+    display: flex;
+    width: max-content;
+    animation: marquee 60s linear infinite;
+  }
+
+  .grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.6'/></svg>");
+  }
+
+  .link-hover {
+    background-image: linear-gradient(var(--color-amber), var(--color-amber));
+    background-size: 0% 1px;
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    transition: background-size 0.4s ease;
+  }
+  .link-hover:hover {
+    background-size: 100% 1px;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes ticker-pulse {
+  0%,
+  100% {
+    color: var(--color-paper);
+  }
+  50% {
+    color: var(--color-amber);
+  }
 }
